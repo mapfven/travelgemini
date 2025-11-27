@@ -184,6 +184,25 @@
         #save-translation-btn:hover {
             background-color: #0b8043;
         }
+        /* 新增按鈕樣式 */
+        #external-links {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 15px;
+            border-top: 1px solid #ddd;
+        }
+        #external-links a button {
+            background-color: #ff9800; /* 顯眼的橘色 */
+            color: white;
+            padding: 10px 20px;
+            font-size: 1.1em;
+            font-weight: bold;
+            text-decoration: none;
+            display: inline-block;
+        }
+        #external-links a button:hover {
+            background-color: #f57c00;
+        }
     </style>
 </head>
 <body>
@@ -258,6 +277,12 @@
         <ul id="history-list">
             </ul>
     </div>
+    
+    <div id="external-links">
+        <a href="https://mapfven.github.io/travel/" target="_blank">
+            <button>旅行記帳本</button>
+        </a>
+    </div>
 </div>
 
 <script>
@@ -274,9 +299,6 @@
     // 輔助函數
     // ===========================================
 
-    /**
-     * 將 Blob 或 File 物件轉換為 Base64 字串
-     */
     function fileToBase64(file) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -290,10 +312,7 @@
     }
     
     /**
-     * 新增：在前端對圖片進行縮放，避免檔案過大導致 API 處理失敗
-     * @param {File} file - 原始圖片檔案
-     * @param {number} maxWidth - 縮放後的圖片最大寬度
-     * @returns {Promise<Blob>} - 縮放後的 Blob 物件
+     * 在前端對圖片進行縮放，避免檔案過大導致 API 處理失敗
      */
     function resizeImage(file, maxWidth = 1024) {
         return new Promise((resolve, reject) => {
@@ -321,14 +340,13 @@
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
 
-                    // 轉換為 Blob 物件
                     canvas.toBlob(blob => {
                         if (blob) {
                             resolve(blob);
                         } else {
                             reject(new Error("Canvas to Blob failed."));
                         }
-                    }, 'image/jpeg', 0.8); // 80% 質量 JPEG 格式
+                    }, 'image/jpeg', 0.8);
                 };
                 img.onerror = reject;
             };
@@ -338,16 +356,13 @@
 
 
     function triggerFileInput(inputId) {
-        // 清除上一次的選擇，確保 onchange 事件可以再次觸發
         document.getElementById('file-select-input').value = null;
         document.getElementById('camera-capture-input').value = null;
-        
         document.getElementById(inputId).click();
     }
 
     // ===========================================
     // 歷史記錄與 Local Storage 邏輯
-    // (與上一個版本相同，省略重複程式碼以保持簡潔，但已在最終版本中包含)
     // ===========================================
 
     function loadHistory() {
@@ -469,6 +484,10 @@
         document.getElementById('api-status').textContent = '🗑️ 記錄已刪除。';
     }
 
+    // ===========================================
+    // 截圖分享邏輯 (修正分享順序問題)
+    // ===========================================
+
     async function shareTranslation(timestamp) {
         const history = loadHistory();
         const item = history.find(i => i.timestamp.toString() === timestamp);
@@ -476,20 +495,30 @@
         if (!item) return;
 
         const shareText = `【Gemini 翻譯結果】\n原文 (${item.fromLang.toUpperCase()}): ${item.sourceText}\n翻譯 (${item.toLang.toUpperCase()}): ${item.translation}`;
+        const statusElement = document.getElementById('api-status');
 
+        // 優先嘗試原生分享文字
         if (navigator.share) {
             try {
                 await navigator.share({
                     title: 'Gemini 翻譯結果',
                     text: shareText
                 });
-                document.getElementById('api-status').textContent = '✅ 已成功調用系統分享。';
-                return;
+                statusElement.textContent = '✅ 已成功調用系統分享。';
+                return; // 原生分享成功或被取消，直接返回，不再執行截圖
             } catch (error) {
-                console.warn("原生分享文字失敗，嘗試截圖分享:", error);
+                // 如果是用戶取消 (DOMException: Share cancelled)，不報錯，也不執行截圖。
+                // 如果是分享失敗 (其他錯誤)，則繼續執行截圖 fallback
+                if (error.name !== 'AbortError' && error.name !== 'DOMException') {
+                    console.warn("原生分享文字失敗，嘗試截圖分享:", error);
+                } else {
+                    statusElement.textContent = '分享已取消。';
+                    return;
+                }
             }
         }
         
+        // 只有當原生分享不可用或明確失敗時，才執行截圖 fallback
         const itemElement = document.querySelector(`.history-item[data-timestamp="${timestamp}"]`);
         if (!itemElement) return;
 
@@ -497,7 +526,7 @@
         controls.style.display = 'none';
 
         if (!window.html2canvas) {
-            alert("請稍候，正在載入截圖函式庫...");
+            statusElement.textContent = "請稍候，正在載入截圖函式庫...";
             const script = document.createElement('script');
             script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
             script.onload = () => captureAndShareFallback(itemElement, controls);
@@ -508,7 +537,9 @@
     }
 
     async function captureAndShareFallback(itemElement, controls) {
+        const statusElement = document.getElementById('api-status');
         try {
+            statusElement.textContent = '🖼️ 正在生成截圖...';
             const canvas = await html2canvas(itemElement, {
                 scale: 2, 
                 backgroundColor: '#fff',
@@ -525,18 +556,18 @@
             }
 
             window.open(imageUrl);
-            alert("瀏覽器不支援原生分享。已在新視窗打開圖片供手動截圖。");
+            statusElement.textContent = "✅ 已在新視窗打開圖片。";
 
         } catch (error) {
             console.error("截圖/分享錯誤:", error);
             controls.style.display = 'flex'; 
-            alert("截圖失敗或生成空白圖片，請檢查瀏覽器設定或重試。");
+            statusElement.textContent = "❌ 截圖失敗或生成空白圖片。";
         }
     }
 
 
     // ===========================================
-    // 圖片上傳翻譯邏輯 (新增圖片壓縮)
+    // 圖片上傳翻譯邏輯
     // ===========================================
 
     async function uploadAndTranslate(event) {
@@ -554,7 +585,6 @@
         document.getElementById('translation-result').value = '請稍候...';
 
         try {
-            // ⭐️ 核心修正：先壓縮圖片到最大 1024px 寬度
             const resizedBlob = await resizeImage(file, 1024); 
             const base64Image = await fileToBase64(resizedBlob);
 
@@ -568,7 +598,6 @@
                 },
                 body: JSON.stringify({
                     image: base64Image,
-                    // 使用壓縮後的 MIME 類型 (jpeg)
                     mime_type: 'image/jpeg', 
                     from_lang: fromLang,
                     to_lang: toLang
@@ -576,7 +605,6 @@
             });
 
             if (!response.ok) {
-                // 如果 API 返回 500 或其他錯誤
                 throw new Error(`HTTP 錯誤! 狀態碼: ${response.status}`);
             }
 
@@ -599,7 +627,7 @@
     }
 
     // ===========================================
-    // 核心純文字翻譯邏輯 (與上一個版本相同)
+    // 核心純文字翻譯邏輯
     // ===========================================
 
     function translateText() {
