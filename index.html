@@ -144,11 +144,35 @@
             flex-direction: column;
             gap: 5px;
         }
+        /* 新增：歷史記錄內容的欄位化結構 */
+        .history-item-content {
+            display: grid;
+            grid-template-columns: 1fr; /* Mobile: Stack */
+            gap: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+            margin-bottom: 10px;
+        }
+        @media (min-width: 600px) {
+            .history-item-content {
+                grid-template-columns: 1fr 1fr; /* Desktop: Two columns */
+            }
+        }
+
         .history-item-text {
             font-size: 0.9em;
             color: #555;
             word-break: break-all;
             cursor: pointer;
+            padding: 8px;
+            border-radius: 4px;
+            background-color: #f8f8f8;
+        }
+        .source-text {
+            border-left: 3px solid #4285f4; /* 藍色邊框 */
+        }
+        .translation-text {
+            border-left: 3px solid #0f9d58; /* 綠色邊框 */
         }
         .toggle-hint { 
             color: #1a73e8;
@@ -184,7 +208,14 @@
         #save-translation-btn:hover {
             background-color: #0b8043;
         }
-        /* 新增按鈕樣式 */
+        #copy-translation-btn { /* 新增複製按鈕樣式 */
+            background-color: #795548; 
+            margin-left: 10px;
+        }
+        #copy-translation-btn:hover {
+            background-color: #5d4037;
+        }
+
         #external-links {
             text-align: center;
             margin-top: 30px;
@@ -192,7 +223,7 @@
             border-top: 1px solid #ddd;
         }
         #external-links a button {
-            background-color: #ff9800; /* 顯眼的橘色 */
+            background-color: #ff9800;
             color: white;
             padding: 10px 20px;
             font-size: 1.1em;
@@ -258,6 +289,9 @@
                 <button id="speech-output-btn" class="action-btn" onclick="speakTranslation()">
                     🔊 朗讀結果
                 </button>
+                <button id="copy-translation-btn" class="action-btn" onclick="copyResult()">
+                    📋 複製內容
+                </button>
                 <button id="save-translation-btn" class="action-btn" onclick="saveCurrentTranslation()">
                     💾 保存翻譯
                 </button>
@@ -311,9 +345,6 @@
         });
     }
     
-    /**
-     * 在前端對圖片進行縮放，避免檔案過大導致 API 處理失敗
-     */
     function resizeImage(file, maxWidth = 1024) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -354,12 +385,32 @@
         });
     }
 
-
     function triggerFileInput(inputId) {
         document.getElementById('file-select-input').value = null;
         document.getElementById('camera-capture-input').value = null;
         document.getElementById(inputId).click();
     }
+    
+    /**
+     * 新增：複製翻譯結果到剪貼簿
+     */
+    function copyResult() {
+        const resultTextarea = document.getElementById('translation-result');
+        if (!resultTextarea.value.trim()) {
+             alert('翻譯結果為空，無需複製。');
+             return;
+        }
+
+        navigator.clipboard.writeText(resultTextarea.value)
+            .then(() => {
+                document.getElementById('api-status').textContent = '✅ 翻譯結果已複製到剪貼簿！';
+            })
+            .catch(err => {
+                console.error('複製失敗:', err);
+                alert('複製失敗，請手動選取複製。');
+            });
+    }
+    window.copyResult = copyResult; // 暴露給 HTML
 
     // ===========================================
     // 歷史記錄與 Local Storage 邏輯
@@ -427,13 +478,15 @@
             const translationTextDisplay = item.translation.substring(0, 100) + '...';
 
             li.innerHTML = `
-                <div class="history-item-text source-text" 
-                    onclick="toggleFullText(this, '${item.timestamp}', 'source')" data-is-full="false">
-                    <strong>原文 (${item.fromLang.toUpperCase()}):</strong> ${sourceTextDisplay} <span class="toggle-hint">(點擊查看完整內容)</span>
-                </div>
-                <div class="history-item-text translation-text" 
-                    onclick="toggleFullText(this, '${item.timestamp}', 'translation')" data-is-full="false">
-                    <strong>翻譯 (${item.toLang.toUpperCase()}):</strong> ${translationTextDisplay} <span class="toggle-hint">(點擊查看完整內容)</span>
+                <div class="history-item-content">
+                    <div class="history-item-text source-text" 
+                        onclick="toggleFullText(this, '${item.timestamp}', 'source')" data-is-full="false">
+                        <strong>原文 (${item.fromLang.toUpperCase()}):</strong> ${sourceTextDisplay} <span class="toggle-hint">(點擊查看完整內容)</span>
+                    </div>
+                    <div class="history-item-text translation-text" 
+                        onclick="toggleFullText(this, '${item.timestamp}', 'translation')" data-is-full="false">
+                        <strong>翻譯 (${item.toLang.toUpperCase()}):</strong> ${translationTextDisplay} <span class="toggle-hint">(點擊查看完整內容)</span>
+                    </div>
                 </div>
                 <div class="history-controls">
                     <button class="action-btn share-btn" onclick="shareTranslation('${item.timestamp}')">
@@ -485,58 +538,30 @@
     }
 
     // ===========================================
-    // 截圖分享邏輯 (修正分享順序問題)
+    // 截圖分享邏輯 (僅分享圖片)
     // ===========================================
 
     async function shareTranslation(timestamp) {
-        const history = loadHistory();
-        const item = history.find(i => i.timestamp.toString() === timestamp);
-        
-        if (!item) return;
-
-        const shareText = `【Gemini 翻譯結果】\n原文 (${item.fromLang.toUpperCase()}): ${item.sourceText}\n翻譯 (${item.toLang.toUpperCase()}): ${item.translation}`;
-        const statusElement = document.getElementById('api-status');
-
-        // 優先嘗試原生分享文字
-        if (navigator.share) {
-            try {
-                await navigator.share({
-                    title: 'Gemini 翻譯結果',
-                    text: shareText
-                });
-                statusElement.textContent = '✅ 已成功調用系統分享。';
-                return; // 原生分享成功或被取消，直接返回，不再執行截圖
-            } catch (error) {
-                // 如果是用戶取消 (DOMException: Share cancelled)，不報錯，也不執行截圖。
-                // 如果是分享失敗 (其他錯誤)，則繼續執行截圖 fallback
-                if (error.name !== 'AbortError' && error.name !== 'DOMException') {
-                    console.warn("原生分享文字失敗，嘗試截圖分享:", error);
-                } else {
-                    statusElement.textContent = '分享已取消。';
-                    return;
-                }
-            }
-        }
-        
-        // 只有當原生分享不可用或明確失敗時，才執行截圖 fallback
         const itemElement = document.querySelector(`.history-item[data-timestamp="${timestamp}"]`);
         if (!itemElement) return;
 
         const controls = itemElement.querySelector('.history-controls');
-        controls.style.display = 'none';
+        const statusElement = document.getElementById('api-status');
+
+        controls.style.display = 'none'; // 隱藏按鈕
 
         if (!window.html2canvas) {
             statusElement.textContent = "請稍候，正在載入截圖函式庫...";
             const script = document.createElement('script');
             script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
-            script.onload = () => captureAndShareFallback(itemElement, controls);
+            script.onload = () => captureAndShareImage(itemElement, controls);
             document.head.appendChild(script);
         } else {
-            captureAndShareFallback(itemElement, controls);
+            captureAndShareImage(itemElement, controls);
         }
     }
 
-    async function captureAndShareFallback(itemElement, controls) {
+    async function captureAndShareImage(itemElement, controls) {
         const statusElement = document.getElementById('api-status');
         try {
             statusElement.textContent = '🖼️ 正在生成截圖...';
@@ -546,22 +571,55 @@
                 scrollX: 0,
                 scrollY: 0,
             });
-
-            controls.style.display = 'flex';
-
-            const imageUrl = canvas.toDataURL('image/png');
             
-            if (imageUrl.length < 50) {
-                 throw new Error("Canvas data is empty.");
-            }
+            // 嘗試將 Canvas 轉換為 Blob (File) 以便進行原生分享
+            canvas.toBlob(async (blob) => {
+                controls.style.display = 'flex'; // 恢復按鈕
+                
+                if (!blob) {
+                    statusElement.textContent = "❌ 截圖生成失敗 (Blob)。";
+                    return;
+                }
 
-            window.open(imageUrl);
-            statusElement.textContent = "✅ 已在新視窗打開圖片。";
+                const imageFile = new File([blob], "gemini_translation_share.png", { type: "image/png" });
+
+                if (navigator.share && navigator.canShare && navigator.canShare({ files: [imageFile] })) {
+                    // 支援原生分享圖片
+                    try {
+                        await navigator.share({
+                            title: 'Gemini 翻譯截圖',
+                            files: [imageFile]
+                        });
+                        statusElement.textContent = '✅ 已成功調用系統分享圖片。';
+                    } catch (error) {
+                         // 如果是用戶取消 (AbortError) 或其他失敗，則執行 fallback
+                        if (error.name !== 'AbortError') {
+                            console.warn("原生圖片分享失敗，嘗試新視窗打開:", error);
+                            // Fallback: 打開新視窗
+                            const imageUrl = canvas.toDataURL('image/png');
+                            window.open(imageUrl);
+                            statusElement.textContent = "✅ 已在新視窗打開圖片供手動分享。";
+                        } else {
+                            statusElement.textContent = '分享已取消。';
+                        }
+                    }
+                } else {
+                    // 不支援原生分享，直接 fallback 到新視窗
+                    const imageUrl = canvas.toDataURL('image/png');
+                    if (imageUrl.length > 50) {
+                        window.open(imageUrl);
+                        statusElement.textContent = "✅ 已在新視窗打開圖片供手動分享。";
+                    } else {
+                        statusElement.textContent = "❌ 截圖生成失敗 (數據空白)。";
+                    }
+                }
+
+            }, 'image/png');
 
         } catch (error) {
             console.error("截圖/分享錯誤:", error);
             controls.style.display = 'flex'; 
-            statusElement.textContent = "❌ 截圖失敗或生成空白圖片。";
+            statusElement.textContent = "❌ 截圖處理錯誤，請重試。";
         }
     }
 
